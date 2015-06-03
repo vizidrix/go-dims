@@ -3,9 +3,14 @@ package dims
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 )
+
+func ErrInvalidPartition(p interface{}) error {
+	return errors.New(fmt.Sprintf("Invalid partition [ %#v ]", p))
+}
 
 type DimPartitioner interface {
 	Display() string
@@ -155,7 +160,12 @@ func MapPartitions(data interface{}, dims ...DimPartitioner) (u []string, d [][]
 	p_div := perms
 	for i := 0; i < dim_l; i++ {
 		d_l := len(accs[i])
-		p_div /= d_l
+		if d_l > 0 {
+			p_div /= d_l
+			if p_div == 0 {
+				p_div = 1
+			}
+		}
 		for p := 0; p < perms; p++ {
 			p_i := (p / p_div) % d_l
 			if i > 0 {
@@ -168,10 +178,11 @@ func MapPartitions(data interface{}, dims ...DimPartitioner) (u []string, d [][]
 }
 
 type MergeDimDef struct {
-	Dims []DimPartitioner
+	separator string
+	Dims      []DimPartitioner
 }
 
-func MergeDim(dims ...DimPartitioner) *MergeDimDef {
+func MergeDim(separator string, dims ...DimPartitioner) *MergeDimDef {
 	return &MergeDimDef{
 		Dims: dims,
 	}
@@ -182,7 +193,7 @@ func (dim *MergeDimDef) Display() string {
 	buf := &bytes.Buffer{}
 	for i := 0; i < l; i++ {
 		if i > 0 {
-			buf.WriteString(" / ")
+			buf.WriteString(dim.separator)
 		}
 		buf.WriteString(dim.Dims[i].Display())
 	}
