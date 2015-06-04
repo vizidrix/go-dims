@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"reflect"
 	"sort"
 )
@@ -40,15 +41,20 @@ func BuildOneDimReport(data interface{}, dim DimPartitioner) (r *OneDimReport, e
 		Total:     0,
 	}
 	data_map := make(map[string]int64)
+	for i := 0; i < l; i++ {
+		data_map[ps[i]] = 0
+	}
 	err = MapSlice(data, func(fact interface{}) error {
 		k, v, err := dim.Partition(fact)
 		if err != nil {
 			return err
 		}
+		log.Printf("Key: [ %s ]", k)
 		data_map[k] += v
 		r.Total += v
 		return nil
 	})
+	log.Printf("DataMap:\n%#v", data_map)
 	for i, p := range ps {
 		r.Data[i] = data_map[p]
 	}
