@@ -3,6 +3,7 @@ package dims
 import (
 	"bytes"
 	"encoding/json"
+	. "github.com/stretchr/testify/assert"
 	"log"
 	"sort"
 	"testing"
@@ -103,6 +104,97 @@ func (dim *Name_DimDef) Partition(fact interface{}) (key interface{}, err error)
 	return
 }
 
+func Test_DimPathDef(t *testing.T) {
+	p := DimPath(
+		DimKey{"key1", 0},
+		DimKey{"key2", 1},
+		DimKey{"key3", 2},
+	)
+	Equal(t, 3, p.Depth)
+	Equal(t, "key1", p.Current.Value, "current")
+	n, err := p.GetNext()
+	NoError(t, err, "get next")
+	Equal(t, 1, n.Current.Index, "get next")
+	Equal(t, "key2", n.Current.Value, "get next")
+	ks, err := p.GetKeys()
+	NoError(t, err, "flatten")
+	Equal(t, "key1", ks[0].Value, "flattened - 1")
+	Equal(t, "key2", ks[1].Value, "flattened - 2")
+	n2, err := n.GetNext()
+	NoError(t, err, "get next 2")
+	NotNil(t, n2)
+	n3, err := n2.GetNext()
+	Error(t, err, "end of path")
+	Equal(t, 0, n3.Depth)
+}
+
+func Test_BucketPathDef(t *testing.T) {
+	p1 := DimPath(DimKey{"key1", 0}, DimKey{"key2", 1}, DimKey{"key3", 2})
+	p2 := DimPath(DimKey{"key4", 3}, DimKey{"key5", 4}, DimKey{"key6", 5})
+	p3 := DimPath(DimKey{"key7", 6}, DimKey{"key8", 7}, DimKey{"key9", 8})
+
+	b := BucketPath(p1, p2, p3)
+
+	Equal(t, 3, b.Depth)
+	Equal(t, "key1", b.Current.Current.Value, "current")
+	n, err := b.GetNext()
+	NoError(t, err, "get next")
+	Equal(t, "key4", n.Current.Current.Value, "get next")
+	dims, err := b.GetDimPaths()
+	NoError(t, err, "flatten")
+	Equal(t, 3, len(dims))
+	Equal(t, "key1", dims[0].Current.Value)
+	Equal(t, "key4", dims[1].Current.Value)
+	Equal(t, "key7", dims[2].Current.Value)
+	n2, err := n.GetNext()
+	NoError(t, err, "get next 2")
+	NotNil(t, n2)
+
+	ks, err := b.GetKeys()
+	NoError(t, err)
+	Equal(t, 3, len(ks), "get keys")
+	Equal(t, 3, len(ks[0]), "get keys 0")
+}
+
+func Test_BucketPathDef_Json(t *testing.T) {
+	p1 := DimPath(DimKey{"key1", 0}, DimKey{"key2", 1}, DimKey{"key3", 2})
+	p2 := DimPath(DimKey{"key4", 3}, DimKey{"key5", 4}, DimKey{"key6", 5})
+
+	b := BucketPath(p1, p2)
+
+	ks, err := b.GetKeys()
+	NoError(t, err)
+
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	err = enc.Encode(ks)
+	NoError(t, err)
+
+	//log.Printf("JSON\n%s\n\n", buf)
+}
+
+func Test_TableReport(t *testing.T) {
+	cfg := &ReportConfig{
+		Map:     CounterMapper,
+		AccFunc: IntSumAccumulator,
+		Dims:    Dims(Set(Value1_Dim()), Set(Value2_Dim(), Name_Dim())),
+	}
+	report, err := TableReport(data, cfg)
+	if err != nil {
+		t.Errorf("Error building report [ %s ]", err)
+	}
+	//dp := report.Data.Ge
+	//d, err := report.Data.GetData()
+	vm, err := report.ToViewModel()
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	//err = enc.Encode(d)
+	err = enc.Encode(vm)
+
+	//err = enc.Encode(report)
+	log.Printf("Two Dim Grid Report:\n[err:%s]\n[\n%#v\n]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report, report.Keys, buf)
+}
+
 /*
 func Test_ZeroDataSet(t *testing.T) {
 	d1 := Value1_Dim()
@@ -126,23 +218,6 @@ func Test_OneDimReport(t *testing.T) {
 	log.Printf("One Dim Report [err:%s]: [\n%#v\n]\n%s\n\n", err, report, buf)
 }
 */
-
-func Test_TableReport(t *testing.T) {
-	cfg := &ReportConfig{
-		Map:     CounterMapper,
-		AccFunc: IntSumAccumulator,
-		Dims:    Dims(Set(Value1_Dim()), Set(Value2_Dim(), Name_Dim())),
-	}
-
-	report, err := TableReport(data, cfg)
-	if err != nil {
-		t.Errorf("Error building report [ %s ]", err)
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	err = enc.Encode(report)
-	log.Printf("Two Dim Grid Report:\n[err:%s]\n[\n%#v\n]\n\njson:\n%s\n\n", err, report, buf)
-}
 
 /*
 func Test_MultiDimension_TwoGridReport(t *testing.T) {

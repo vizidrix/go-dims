@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"log"
 	"reflect"
+	"strconv"
 	//"sort"
 )
+
+var ErrEndOfPath = errors.New("End of path")
 
 func ErrInvalidPartition(p interface{}) error {
 	return errors.New(fmt.Sprintf("Invalid partition [ %#v ]", p))
@@ -36,10 +39,20 @@ type DimPartitioner interface {
 type Mapper func(v interface{}) interface{}
 
 type Accumulator interface {
+	//Path() []DimPathDef
 	Acc(v interface{})
 	Value() interface{}
 }
 
+/*
+type AccumulatorDef struct {
+	dims []DimPathDef
+}
+
+func (a AccumulatorDef) Dims() []DimPathDef {
+	return a.dims
+}
+*/
 type AccumulatorFunc func() Accumulator
 
 func CounterMapper(v interface{}) interface{} {
@@ -47,6 +60,7 @@ func CounterMapper(v interface{}) interface{} {
 }
 
 type IntSumAccumulatorDef struct {
+	//AccumulatorDef
 	value int
 }
 
@@ -62,81 +76,190 @@ func (acc *IntSumAccumulatorDef) Value() interface{} {
 	return acc.value
 }
 
+//func IntSumAccumulator(paths []DimPathDef) Accumulator {
 func IntSumAccumulator() Accumulator {
 	return &IntSumAccumulatorDef{0}
 }
 
 type DimKey struct {
-	Value interface{}
-	Index int
+	Value interface{} `json:"v"`
+	Index int         `json:"i"`
 }
 
 type DimPathDef struct {
-	Key   DimKey
-	More  interface{}
-	Depth int
+	Current DimKey
+	Next    interface{}
+	Depth   int
 }
 
 func DimPath(keys ...DimKey) DimPathDef {
-	var more interface{}
+	var next interface{}
 	l := len(keys)
 	if l > 1 {
-		more = DimPath(keys[1:]...)
+		next = DimPath(keys[1:]...)
 	}
-	return DimPathDef{keys[0], more, l}
+	return DimPathDef{keys[0], next, l}
 }
 
-func (p DimPathDef) Flatten() (r []DimKey) {
-	r = make([]DimKey, p.Depth, p.Depth)
+func (p DimPathDef) GetNext() (r DimPathDef, err error) {
+	var ok bool
+	if p.Depth > 0 {
+		if r, ok = (p.Next).(DimPathDef); ok {
+			return
+		}
+	}
+	err = ErrEndOfPath
+	return
+}
 
+func (p DimPathDef) GetKeys() (r []DimKey, err error) {
+	r = make([]DimKey, 0, p.Depth)
+	for {
+		r = append(r, p.Current)
+		if p, err = p.GetNext(); err != nil {
+			if err == ErrEndOfPath {
+				err = nil
+			}
+			return
+		}
+	}
 	return
 }
 
 type BucketPathDef struct {
-	Key   DimPathDef
-	More  interface{}
-	Depth int
+	Current DimPathDef
+	Next    interface{}
+	Depth   int
 }
 
 func BucketPath(keys ...DimPathDef) BucketPathDef {
-	var more interface{}
+	var next interface{}
 	l := len(keys)
 	if l > 1 {
-		more = BucketPath(keys[1:]...)
+		next = BucketPath(keys[1:]...)
 	}
-	return BucketPathDef{keys[0], more, l}
+	return BucketPathDef{keys[0], next, l}
 }
 
-func (p BucketPathDef) Flatten() (r [][]DimKey) {
-	r = make([][]DimKey, p.Depth, p.Depth)
-	k := p.Key
-	m := p.More.(DimPathDef)
-	log.Printf("k [ %#v ]", k)
-	for i := 0; i < p.Depth; i++ {
-		r[i] = k.Flatten()
-		log.Printf("\n\nFlattened [ %#v ]", r[i])
-		log.Printf("\n\nMore [ %#v ]", m)
-		//k = k.More.(DimPathDef)
-		k = m
-		m = k.More.(DimPathDef)
+func (b BucketPathDef) GetNext() (r BucketPathDef, err error) {
+	var ok bool
+	if b.Depth >= 0 {
+		if r, ok = (b.Next).(BucketPathDef); !ok {
+			err = ErrEndOfPath
+			return
+		}
+	} else {
+		err = ErrEndOfPath
+	}
+	return
+}
+
+func (b BucketPathDef) GetDimPaths() (r []DimPathDef, err error) {
+	r = make([]DimPathDef, 0, b.Depth)
+	for {
+		r = append(r, b.Current)
+		if b, err = b.GetNext(); err != nil {
+			if err == ErrEndOfPath {
+				err = nil
+			}
+			return
+		}
+	}
+	return
+}
+
+func (b BucketPathDef) GetKeys() (r [][]DimKey, err error) {
+	var ps []DimPathDef
+	if ps, err = b.GetDimPaths(); err != nil {
+		return
+	}
+	l := len(ps)
+	r = make([][]DimKey, l, l)
+	for i, p := range ps {
+		if r[i], err = p.GetKeys(); err != nil {
+			return
+		}
 	}
 	return
 }
 
 type BucketAccumulator map[BucketPathDef]Accumulator
 
-func (t BucketAccumulator) MarshalJSON() ([]byte, error) {
-	for k, v := range t {
-		log.Printf("\nK[%#v] V[%#v]\n", k, v.Value())
-		path := k.Flatten()
-		log.Printf("Path [ %#v ]", path)
+func (t BucketAccumulator) GetSubtotals() (r []map[string]interface{}, err error) {
+	t_l := len(t)
+	r = make([]map[string]interface{}, t_l, t_l)
+	var s map[string]interface{}
+	for b, acc := range t {
+		ds, err = b.GetKeys()
+		d1_l := len(ds[0])
+		d2_l := len(ds[1])
+		for i = 0; i < d1_l; i++ {
+			k = strconv.FormatInt(int64(ds[0][i].Index), 10)
+			if q, ok = s[k]; !ok { // Index not found in map
+				q = make(map[string]interface{})
+				s[k] = q
+			}
+			s = q.(map[string]interface{})
+		}
+		for i = 0; i < d2_l; i++ {
+			k = strconv.FormatInt(int64(ds[1][i].Index), 10)
+			if q, ok = s[k]; !ok { // Index not found in map
+				q = make(map[string]interface{})
+				s[k] = q
+			}
+			s = q.(map[string]interface{})
+		}
+	}
+}
+
+// [[d1]][[d2][d3]]value
+func (t BucketAccumulator) GetData() (r map[string]interface{}, err error) {
+	var ds [][]DimKey
+	r = make(map[string]interface{}) // Container
+	var ok bool
+	var k string
+	var i int
+	var s map[string]interface{}
+	var q interface{}
+	for b, acc := range t {
+		ds, err = b.GetKeys()
 		/*
-			keys := make([]JsonDimKey, 0, 1)
-			for ; k.More != nil; k = k.More.(BucketPathDef) {
-				keys = append(keys, JsonDimKey{fmt.Sprintf("%s", k.Key.Key.Value), k.Key.Key.Index})
-				log.Printf("\n\n* Keys [ %#v ]", keys)
+			d_l := len(ds)
+			for d := 0; d < d_l; d++ {
+				k_l := len(ds[d])
 			}
 		*/
+		d1_l := len(ds[0])
+		d2_l := len(ds[1])
+		s = r
+		for i = 0; i < d1_l; i++ {
+			k = strconv.FormatInt(int64(ds[0][i].Index), 10)
+			if q, ok = s[k]; !ok { // Index not found in map
+				q = make(map[string]interface{})
+				s[k] = q
+			}
+			s = q.(map[string]interface{})
+		}
+		for i = 0; i < d2_l-1; i++ {
+			k = strconv.FormatInt(int64(ds[1][i].Index), 10)
+			if q, ok = s[k]; !ok { // Index not found in map
+				q = make(map[string]interface{})
+				s[k] = q
+			}
+			s = q.(map[string]interface{})
+		}
+		k = strconv.FormatInt(int64(ds[1][d2_l-1].Index), 10)
+		s[k] = acc.Value()
+	}
+	return
+}
+
+func (t BucketAccumulator) MarshalJSON() (b []byte, err error) {
+	for k, v := range t {
+		log.Printf("\nK[%#v] V[%#v]\n", k, v.Value())
+		for k, err = k.GetNext(); err == nil; k, err = k.GetNext() {
+			log.Printf("\n\n%#v", k)
+		}
 	}
 	return nil, errors.New("err")
 }
@@ -147,6 +270,60 @@ type TableReportDef struct {
 	SubTotals [][]Accumulator
 	Data      BucketAccumulator
 	Total     Accumulator
+}
+
+type TableReportViewModel struct {
+	Legends   [][]string
+	Keys      [][][]string
+	SubTotals [][]interface{}
+	Data      interface{}
+	Total     interface{}
+}
+
+func (t *TableReportDef) ToViewModel() (vm *TableReportViewModel, err error) {
+	vm = &TableReportViewModel{}
+	// Legends
+	l := len(t.Legends)
+	vm.Legends = make([][]string, l, l)
+	for i := 0; i < l; i++ {
+		l_i := len(t.Legends[i])
+		vm.Legends[i] = make([]string, l_i, l_i)
+		for j := 0; j < l_i; j++ {
+			vm.Legends[i][j] = fmt.Sprintf("%s", t.Legends[i][j])
+		}
+	}
+	// Keys
+	l = len(t.Keys)
+	vm.Keys = make([][][]string, l, l)
+	for i := 0; i < l; i++ {
+		l_i := len(t.Keys[i])
+		vm.Keys[i] = make([][]string, l_i, l_i)
+		for j := 0; j < l_i; j++ {
+			l_j := len(t.Keys[i][j])
+			vm.Keys[i][j] = make([]string, l_j, l_j)
+			for k := 0; k < l_j; k++ {
+				vm.Keys[i][j][k] = fmt.Sprintf("%s", t.Keys[i][j][k])
+			}
+		}
+	}
+	// SubTotals
+	l = len(t.SubTotals)
+	vm.SubTotals = make([][]interface{}, l, l)
+	for i := 0; i < l; i++ {
+		l_i := len(t.SubTotals[i])
+		vm.SubTotals[i] = make([]interface{}, l_i, l_i)
+		for j := 0; j < l_i; j++ {
+			vm.SubTotals[i][j] = t.SubTotals[i][j].Value()
+		}
+	}
+	// Data
+	if vm.Data, err = t.Data.GetData(); err != nil {
+		return
+	}
+
+	// Total
+	vm.Total = t.Total.Value()
+	return
 }
 
 type ReportConfig struct {
@@ -167,15 +344,18 @@ func TableReport(data interface{}, c *ReportConfig) (r *TableReportDef, err erro
 	r.Legends = make([][]interface{}, s_l, s_l)
 	r.Keys = make([][][]interface{}, s_l, s_l)
 	r.SubTotals = make([][]Accumulator, s_l, s_l)
+	//subs := make(map[string])
 	r.Data = make(map[BucketPathDef]Accumulator)
 	dimkeys := make([][]DimKey, s_l, s_l)
 	dimpaths := make([]DimPathDef, s_l, s_l)
 	dimlen := make([]int, s_l, s_l)
+	dimkeylen := make([][]int, s_l, s_l)
 	keymaps := make([]map[interface{}]int, s_l, s_l)
 	for s = 0; s < s_l; s++ { // For each dim set build def dimension
 		dimlen[s] = len(c.Dims[s].Dims)
 		d_l = dimlen[s]
 		dimkeys[s] = make([]DimKey, d_l, d_l)
+		dimkeylen[s] = make([]int, d_l, d_l)
 		r.Legends[s] = c.Dims[s].Legends()
 		if r.Keys[s], err = c.Dims[s].GetPartitionMap(data); err != nil {
 			return
@@ -186,26 +366,34 @@ func TableReport(data interface{}, c *ReportConfig) (r *TableReportDef, err erro
 			r.SubTotals[s][d] = c.AccFunc()
 			keys := r.Keys[s][d]
 			k_l = len(keys)
+			dimkeylen[s][d] = k_l
 			for k = 0; k < k_l; k++ {
 				keymaps[s][keys[k]] = k
 			}
 		}
 	}
 	err = MapSlice(data, func(fact interface{}) error {
+		v := c.Map(fact)
 		for s = 0; s < s_l; s++ {
 			keys, err = c.Dims[s].Partition(fact)
 			for d = 0; d < dimlen[s]; d++ {
 				dimkeys[s][d].Value = keys[d]
 				dimkeys[s][d].Index = keymaps[s][keys[d]] // map to key index of value in dim
+				//log.Printf("\nKey: %d of %d -- %d k[ %#v ]\n", dimkeys[s][d].Index, k_l, dimlen[s], keymaps[s])
+				log.Printf("\nKey: %d of %d\n", dimkeys[s][d].Index, dimkeylen[s][d]) //k_l)
 			}
 			dimpaths[s] = DimPath(dimkeys[s]...)
 		}
+		//for i, dp := range dimpaths {
 		b := BucketPath(dimpaths...)
 		if a, ok = r.Data[b]; !ok {
 			r.Data[b] = c.AccFunc()
 			a = r.Data[b]
 		}
-		a.Acc(c.Map(fact))
+		log.Printf("\nB:\n[%#v]\n\n", b)
+		a.Acc(v)
+		//r.SubTotals[b.Depth][0]
+		r.Total.Acc(v)
 		return nil
 	})
 	return
@@ -255,7 +443,6 @@ func (s *DimSet) Partition(fact interface{}) (keys []interface{}, err error) {
 		if keys[i], err = s.Dims[i].Partition(fact); err != nil {
 			return
 		}
-		//keys = append(keys, s.Dims[i].Partition(fact)...)
 	}
 	return
 }
@@ -323,6 +510,39 @@ func MapPartitions(data interface{}, dims ...DimPartitioner) (d [][]interface{},
 	}
 	return
 }
+
+//keys = append(keys, s.Dims[i].Partition(fact)...)
+//e, err := k.GetNext()
+
+//path := k.Flatten()
+//log.Printf("Path [ %#v ]", path)
+/*
+	keys := make([]JsonDimKey, 0, 1)
+	for ; k.More != nil; k = k.More.(BucketPathDef) {
+		keys = append(keys, JsonDimKey{fmt.Sprintf("%s", k.Key.Key.Value), k.Key.Key.Index})
+		log.Printf("\n\n* Keys [ %#v ]", keys)
+	}
+*/
+
+//if p.Key != nil {
+//	return p.Key
+//}
+/*
+	r = make([][]DimKey, p.Depth, p.Depth)
+	k := p.Key
+	m := p.More.(DimPathDef)
+	log.Printf("k [ %#v ]", k)
+	for i := 0; i < p.Depth; i++ {
+		r[i] = k.Flatten()
+		log.Printf("\n\nFlattened [ %#v ]", r[i])
+		log.Printf("\n\nMore [ %#v ]", m)
+		//k = k.More.(DimPathDef)
+		k = m
+		m = k.More.(DimPathDef)
+	}
+*/
+//	return
+//}
 
 //u = make([]string, dim_l, dim_l)
 //c := make([]int, dim_l, dim_l)
