@@ -9,6 +9,10 @@ import (
 	"testing"
 )
 
+func init() {
+	log.SetFlags(log.Llongfile)
+}
+
 type RawSource struct {
 	Value1 string
 	Value2 string
@@ -183,16 +187,12 @@ func Test_TableReport(t *testing.T) {
 	if err != nil {
 		t.Errorf("Error building report [ %s ]", err)
 	}
-	//dp := report.Data.Ge
-	//d, err := report.Data.GetData()
 	vm, err := report.ToViewModel()
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
-	//err = enc.Encode(d)
 	err = enc.Encode(vm)
 
-	//err = enc.Encode(report)
-	log.Printf("Two Dim Grid Report:\n[err:%s]\n[\n%#v\n]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report, report.Keys, buf)
+	log.Printf("Two Dim Grid Report:\n[err:%s]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report.Keys, buf)
 }
 
 /*

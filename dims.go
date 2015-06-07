@@ -39,20 +39,10 @@ type DimPartitioner interface {
 type Mapper func(v interface{}) interface{}
 
 type Accumulator interface {
-	//Path() []DimPathDef
 	Acc(v interface{})
 	Value() interface{}
 }
 
-/*
-type AccumulatorDef struct {
-	dims []DimPathDef
-}
-
-func (a AccumulatorDef) Dims() []DimPathDef {
-	return a.dims
-}
-*/
 type AccumulatorFunc func() Accumulator
 
 func CounterMapper(v interface{}) interface{} {
@@ -60,7 +50,6 @@ func CounterMapper(v interface{}) interface{} {
 }
 
 type IntSumAccumulatorDef struct {
-	//AccumulatorDef
 	value int
 }
 
@@ -76,7 +65,6 @@ func (acc *IntSumAccumulatorDef) Value() interface{} {
 	return acc.value
 }
 
-//func IntSumAccumulator(paths []DimPathDef) Accumulator {
 func IntSumAccumulator() Accumulator {
 	return &IntSumAccumulatorDef{0}
 }
@@ -183,36 +171,38 @@ func (b BucketPathDef) GetKeys() (r [][]DimKey, err error) {
 	return
 }
 
+type DimAccumulator map[DimPathDef]Accumulator
 type BucketAccumulator map[BucketPathDef]Accumulator
 
-func (t BucketAccumulator) GetSubtotals() (r []map[string]interface{}, err error) {
-	t_l := len(t)
-	r = make([]map[string]interface{}, t_l, t_l)
+func (t DimAccumulator) GetData() (r map[string]interface{}, err error) {
+	var ds []DimKey
+	r = make(map[string]interface{})
 	var s map[string]interface{}
-	for b, acc := range t {
-		ds, err = b.GetKeys()
-		d1_l := len(ds[0])
-		d2_l := len(ds[1])
-		for i = 0; i < d1_l; i++ {
-			k = strconv.FormatInt(int64(ds[0][i].Index), 10)
-			if q, ok = s[k]; !ok { // Index not found in map
+	var q interface{}
+	var ok bool
+	//log.Printf("\n* Subs [ %#v ]", t)
+	var k string
+	for d, acc := range t {
+		s = r
+		ds, err = d.GetKeys()
+		//log.Printf("\n* Keys [ %#v ]", ds)
+		d_l := len(ds)
+		for d := 0; d < d_l-1; d++ {
+			//dk := ds[d]
+			//log.Printf("\n* Key [ %#v ]", dk)
+			k = strconv.FormatInt(int64(ds[d].Index), 10)
+			if q, ok = s[k]; !ok {
 				q = make(map[string]interface{})
 				s[k] = q
 			}
 			s = q.(map[string]interface{})
 		}
-		for i = 0; i < d2_l; i++ {
-			k = strconv.FormatInt(int64(ds[1][i].Index), 10)
-			if q, ok = s[k]; !ok { // Index not found in map
-				q = make(map[string]interface{})
-				s[k] = q
-			}
-			s = q.(map[string]interface{})
-		}
+		k = strconv.FormatInt(int64(ds[d_l-1].Index), 10)
+		s[k] = acc.Value()
 	}
+	return
 }
 
-// [[d1]][[d2][d3]]value
 func (t BucketAccumulator) GetData() (r map[string]interface{}, err error) {
 	var ds [][]DimKey
 	r = make(map[string]interface{}) // Container
@@ -220,43 +210,32 @@ func (t BucketAccumulator) GetData() (r map[string]interface{}, err error) {
 	var k string
 	var i int
 	var s map[string]interface{}
+	s = r
 	var q interface{}
 	for b, acc := range t {
 		ds, err = b.GetKeys()
-		/*
-			d_l := len(ds)
-			for d := 0; d < d_l; d++ {
-				k_l := len(ds[d])
+		d_l := len(ds)
+		for d := 0; d < d_l; d++ {
+			k_l := len(ds[d])
+			for i = 0; i < k_l; i++ {
+				k = strconv.FormatInt(int64(ds[d][i].Index), 10)
+				if d == d_l-1 && i == k_l-1 { // Check for last entry of the last dim
+					s[k] = acc.Value()
+				} else {
+					if q, ok = s[k]; !ok { // Index not found in map
+						q = make(map[string]interface{})
+						s[k] = q
+					}
+					s = q.(map[string]interface{})
+				}
 			}
-		*/
-		d1_l := len(ds[0])
-		d2_l := len(ds[1])
-		s = r
-		for i = 0; i < d1_l; i++ {
-			k = strconv.FormatInt(int64(ds[0][i].Index), 10)
-			if q, ok = s[k]; !ok { // Index not found in map
-				q = make(map[string]interface{})
-				s[k] = q
-			}
-			s = q.(map[string]interface{})
 		}
-		for i = 0; i < d2_l-1; i++ {
-			k = strconv.FormatInt(int64(ds[1][i].Index), 10)
-			if q, ok = s[k]; !ok { // Index not found in map
-				q = make(map[string]interface{})
-				s[k] = q
-			}
-			s = q.(map[string]interface{})
-		}
-		k = strconv.FormatInt(int64(ds[1][d2_l-1].Index), 10)
-		s[k] = acc.Value()
 	}
 	return
 }
 
 func (t BucketAccumulator) MarshalJSON() (b []byte, err error) {
-	for k, v := range t {
-		log.Printf("\nK[%#v] V[%#v]\n", k, v.Value())
+	for k, _ := range t {
 		for k, err = k.GetNext(); err == nil; k, err = k.GetNext() {
 			log.Printf("\n\n%#v", k)
 		}
@@ -267,7 +246,7 @@ func (t BucketAccumulator) MarshalJSON() (b []byte, err error) {
 type TableReportDef struct {
 	Legends   [][]interface{}
 	Keys      [][][]interface{}
-	SubTotals [][]Accumulator
+	SubTotals []DimAccumulator
 	Data      BucketAccumulator
 	Total     Accumulator
 }
@@ -275,7 +254,7 @@ type TableReportDef struct {
 type TableReportViewModel struct {
 	Legends   [][]string
 	Keys      [][][]string
-	SubTotals [][]interface{}
+	SubTotals []interface{}
 	Data      interface{}
 	Total     interface{}
 }
@@ -293,8 +272,8 @@ func (t *TableReportDef) ToViewModel() (vm *TableReportViewModel, err error) {
 		}
 	}
 	// Keys
-	l = len(t.Keys)
-	vm.Keys = make([][][]string, l, l)
+	l_k := len(t.Keys)
+	vm.Keys = make([][][]string, l_k, l_k)
 	for i := 0; i < l; i++ {
 		l_i := len(t.Keys[i])
 		vm.Keys[i] = make([][]string, l_i, l_i)
@@ -307,15 +286,13 @@ func (t *TableReportDef) ToViewModel() (vm *TableReportViewModel, err error) {
 		}
 	}
 	// SubTotals
-	l = len(t.SubTotals)
-	vm.SubTotals = make([][]interface{}, l, l)
+	vm.SubTotals = make([]interface{}, l, l)
 	for i := 0; i < l; i++ {
-		l_i := len(t.SubTotals[i])
-		vm.SubTotals[i] = make([]interface{}, l_i, l_i)
-		for j := 0; j < l_i; j++ {
-			vm.SubTotals[i][j] = t.SubTotals[i][j].Value()
+		if vm.SubTotals[i], err = t.SubTotals[i].GetData(); err != nil {
+			return
 		}
 	}
+
 	// Data
 	if vm.Data, err = t.Data.GetData(); err != nil {
 		return
@@ -343,14 +320,13 @@ func TableReport(data interface{}, c *ReportConfig) (r *TableReportDef, err erro
 	s_l = len(c.Dims)
 	r.Legends = make([][]interface{}, s_l, s_l)
 	r.Keys = make([][][]interface{}, s_l, s_l)
-	r.SubTotals = make([][]Accumulator, s_l, s_l)
-	//subs := make(map[string])
 	r.Data = make(map[BucketPathDef]Accumulator)
 	dimkeys := make([][]DimKey, s_l, s_l)
 	dimpaths := make([]DimPathDef, s_l, s_l)
 	dimlen := make([]int, s_l, s_l)
 	dimkeylen := make([][]int, s_l, s_l)
 	keymaps := make([]map[interface{}]int, s_l, s_l)
+	r.SubTotals = make([]DimAccumulator, s_l, s_l)
 	for s = 0; s < s_l; s++ { // For each dim set build def dimension
 		dimlen[s] = len(c.Dims[s].Dims)
 		d_l = dimlen[s]
@@ -361,9 +337,8 @@ func TableReport(data interface{}, c *ReportConfig) (r *TableReportDef, err erro
 			return
 		}
 		keymaps[s] = make(map[interface{}]int)
-		r.SubTotals[s] = make([]Accumulator, d_l, d_l)
+		r.SubTotals[s] = make(map[DimPathDef]Accumulator)
 		for d = 0; d < d_l; d++ {
-			r.SubTotals[s][d] = c.AccFunc()
 			keys := r.Keys[s][d]
 			k_l = len(keys)
 			dimkeylen[s][d] = k_l
@@ -372,27 +347,28 @@ func TableReport(data interface{}, c *ReportConfig) (r *TableReportDef, err erro
 			}
 		}
 	}
+	st := make([]DimAccumulator, s_l, s_l)
 	err = MapSlice(data, func(fact interface{}) error {
 		v := c.Map(fact)
 		for s = 0; s < s_l; s++ {
+			st[s] = make(map[DimPathDef]Accumulator)
 			keys, err = c.Dims[s].Partition(fact)
 			for d = 0; d < dimlen[s]; d++ {
 				dimkeys[s][d].Value = keys[d]
 				dimkeys[s][d].Index = keymaps[s][keys[d]] // map to key index of value in dim
-				//log.Printf("\nKey: %d of %d -- %d k[ %#v ]\n", dimkeys[s][d].Index, k_l, dimlen[s], keymaps[s])
-				log.Printf("\nKey: %d of %d\n", dimkeys[s][d].Index, dimkeylen[s][d]) //k_l)
 			}
 			dimpaths[s] = DimPath(dimkeys[s]...)
+			if _, ok = r.SubTotals[s][dimpaths[s]]; !ok {
+				r.SubTotals[s][dimpaths[s]] = c.AccFunc()
+			}
+			r.SubTotals[s][dimpaths[s]].Acc(v)
 		}
-		//for i, dp := range dimpaths {
 		b := BucketPath(dimpaths...)
 		if a, ok = r.Data[b]; !ok {
 			r.Data[b] = c.AccFunc()
 			a = r.Data[b]
 		}
-		log.Printf("\nB:\n[%#v]\n\n", b)
 		a.Acc(v)
-		//r.SubTotals[b.Depth][0]
 		r.Total.Acc(v)
 		return nil
 	})
@@ -423,9 +399,6 @@ func (s *DimSet) Legends() (r []interface{}) {
 }
 
 func (s *DimSet) GetPartitionMap(data interface{}) (keys [][]interface{}, err error) {
-	defer func() {
-		log.Printf("DimSet GetPartitionMap keys[\n%#v\n]", keys)
-	}()
 	l := len(s.Dims)
 	keys = make([][]interface{}, l, l)
 	for i := 0; i < l; i++ {
@@ -510,384 +483,3 @@ func MapPartitions(data interface{}, dims ...DimPartitioner) (d [][]interface{},
 	}
 	return
 }
-
-//keys = append(keys, s.Dims[i].Partition(fact)...)
-//e, err := k.GetNext()
-
-//path := k.Flatten()
-//log.Printf("Path [ %#v ]", path)
-/*
-	keys := make([]JsonDimKey, 0, 1)
-	for ; k.More != nil; k = k.More.(BucketPathDef) {
-		keys = append(keys, JsonDimKey{fmt.Sprintf("%s", k.Key.Key.Value), k.Key.Key.Index})
-		log.Printf("\n\n* Keys [ %#v ]", keys)
-	}
-*/
-
-//if p.Key != nil {
-//	return p.Key
-//}
-/*
-	r = make([][]DimKey, p.Depth, p.Depth)
-	k := p.Key
-	m := p.More.(DimPathDef)
-	log.Printf("k [ %#v ]", k)
-	for i := 0; i < p.Depth; i++ {
-		r[i] = k.Flatten()
-		log.Printf("\n\nFlattened [ %#v ]", r[i])
-		log.Printf("\n\nMore [ %#v ]", m)
-		//k = k.More.(DimPathDef)
-		k = m
-		m = k.More.(DimPathDef)
-	}
-*/
-//	return
-//}
-
-//u = make([]string, dim_l, dim_l)
-//c := make([]int, dim_l, dim_l)
-//perms := 1
-
-//sort.Sort(ByAlpha(d[i]))
-//c[i] = len(d[i])
-//perms *= c[i]
-
-//u = make([]string, perms, perms)
-/*
-	p_div := perms
-	for i := 0; i < dim_l; i++ {
-		d_l := len(accs[i])
-		if d_l > 0 {
-			p_div /= d_l
-			if p_div == 0 {
-				p_div = 1
-			}
-		}
-		for p := 0; p < perms; p++ {
-			p_i := (p / p_div) % d_l
-			if i > 0 {
-				u[p] += " "
-			}
-			u[p] += d[i][p_i]
-		}
-	}
-*/
-//	return
-//}
-
-/*
-type TableReportDef struct {
-	Legends   [2][]interface{}
-	Keys      [2][][]interface{}
-	SubTotals [2]map[int]interface{}
-	//Dim1UnionKeys []string
-	//Dim1Keys      [][]string
-	//Dim2UnionKeys []string
-	//Dim2Keys      [][]string
-	//Data map[string]map[string]interface{} // Dim1 / Dim2 = Value
-	//Data map[int]map[int]interface{} // Dim1 / Dim2 = Value
-	Data map[DimPathDef]map[DimPathDef]interface{}
-
-	//Dim1Totals    []int64
-	//Dim2Totals    []int64
-	Total interface{}
-}
-*/
-//Dim1UnionKeys []string
-//Dim1Keys      [][]string
-//Dim2UnionKeys []string
-//Dim2Keys      [][]string
-//Data map[string]map[string]interface{} // Dim1 / Dim2 = Value
-//Data map[int]map[int]interface{} // Dim1 / Dim2 = Value
-//Data map[DimPathDef]map[DimPathDef]interface{}
-//Dim1Totals    []int64
-//Dim2Totals    []int64
-//Dim1 DimSet
-//Dim2 DimSet
-/*
-		Legends: [2][]string{
-			cfg.Dim1.Legends(),
-			cfg.Dim2.Legends(),
-		},
-	}
-	if r.Keys[0], err = cfg.Dim1.GetPartitionMap(data); err != nil {
-		return
-	}
-	if r.Keys[1], err = cfg.Dim2.GetPartitionMap(data); err != nil {
-		return
-	}
-	r.SubTotals[0] = make(map[int]interface{})
-	r.SubTotals[1] = make(map[int]interface{})
-	l0 := len(r.Legends[0])
-	l1 := len(r.Legends[1])
-	km0 := make([]map[interface{}]int, l0, l0)
-	km1 := make([]map[interface{}]int, l1, l1)
-	var i, j, k_l int
-	for i = 0; i < l0; i++ {
-		km0[i] = make(map[interface{}]int)
-		k := r.Keys[0][i] // Keys for dimension
-		k_l = len(k)
-		for j = 0; j < k_l; j++ {
-			km0[i][k[j]]
-		}
-	}
-
-	err = MapSlice(data, func(fact interface{}) error {
-		k1, err = dim1.Partition(fact)
-		if err != nil {
-			return err
-		}
-		k2, err = dim2.Partition(fact)
-		if err != nil {
-			return err
-		}
-		p1 := DimPath(k1...)
-		data_map[k1][k2] += f(fact)
-		return nil
-	})
-	//r.SubTotals[0] = make([]int64, k0, k0)
-	//r.SubTotals[1] = make([]int64, k1, k1)
-}
-*/
-
-/*
-type OneDimReport struct {
-	Legends   []string
-	UnionKeys []string
-	Keys      []string
-	Data      []int64
-	Total     int64
-}
-
-func BuildOneDimReport(data interface{}, dim DimPartitioner) (r *OneDimReport, err error) {
-	var pss [2][]string
-	if pss, err = dim.GetPartitions(data); err != nil {
-		return
-	}
-	ps := pss[0]
-	l := len(ps)
-	r = &OneDimReport{
-		Legends:   dim.Legend(),
-		UnionKeys: ps,
-		Keys:      ps,
-		Data:      make([]int64, l, l),
-		Total:     0,
-	}
-	data_map := make(map[string]int64)
-	for i := 0; i < l; i++ {
-		data_map[ps[i]] = 0
-	}
-	err = MapSlice(data, func(fact interface{}) error {
-		k, v, err := dim.Partition(fact)
-		if err != nil {
-			return err
-		}
-		log.Printf("Key: [ %s ]", k)
-		data_map[k] += v
-		r.Total += v
-		return nil
-	})
-	log.Printf("DataMap:\n%#v", data_map)
-	for i, p := range ps {
-		r.Data[i] = data_map[p]
-	}
-	return
-}
-*/
-
-/*
-func BuildTwoDimGridReport(data interface{}, m Mapper, acc Accumulator, dim1, dim2 DimPartitioner) (r *TwoDimReport, err error) {
-	r = &TwoDimReport{
-		Legends: [2][]string{
-			dim1.Legend(),
-			dim2.Legend(),
-		},
-	}
-	if r.Keys[0], err = dim1.GetPartitions(data); err != nil {
-		return
-	}
-	if r.Keys[1], err = dim2.GetPartitions(data); err != nil {
-		return
-	}
-	l0 := len(r.Legends[0])
-	l1 := len(r.Legends[1])
-	k0 := 0
-	k1 := 0
-	for i := 0; i < l0; i++ {
-		k0 *= len(r.Keys[0][i])
-	}
-	for i := 0; i < l1; i++ {
-		k1 *= len(r.Keys[1][i])
-	}
-	r.SubTotals[0] = make([]int64, k0, k0)
-	r.SubTotals[1] = make([]int64, k1, k1)
-
-	//r.Data = make([][]int64, l0, l0)
-	//for i := 0; i < l1; i++ {
-	//	r.Data[i] = make([]int64, l1, l1)
-	//}
-
-	km0 := make([]map[string]int, l0, l0) // For each sub dim
-	data_map := make(map[string]map[string]int64)
-	for _, k1s := range r.Keys[0] {
-		data_map[du1] = make(map[string]int64)
-		for _, du2 := range r.Keys[1] {
-			data_map[du1][du2] = 0
-		}
-	}
-	var k1 []string
-	var k2 []string
-	err = MapSlice(data, func(fact interface{}) error {
-		k1, err = dim1.Partition(fact)
-		if err != nil {
-			return err
-		}
-		k2, err = dim2.Partition(fact)
-		if err != nil {
-			return err
-		}
-		data_map[k1][k2] += f(fact)
-		return nil
-	})
-	for i, p1 := range r.Dim1UnionKeys {
-		for j, p2 := range r.Dim2UnionKeys {
-			v := data_map[p1][p2]
-			r.Data[i][j] = v
-			r.Totals[0][i] += v
-			r.Totals[1][j] += v
-			r.Total += v
-		}
-	}
-	return
-}
-*/
-
-/*
-fact, ok := in.(Fact)
-		if !ok {
-			return errors.New(fmt.Sprintf("Invalid fact [ %#v ]", in))
-		}
-fact_v := reflect.ValueOf(fact)
-		if fact_v.Kind() == reflect.Ptr {
-			fact_v = fact_v.Elem()
-		}
-		fact_type := reflect.TypeOf(i)
-*/
-/*
-func MapPartitions(data interface{}, dim DimPartitioner) (keys [][]interface{}, err error) {
-
-}
-func MapPartitions(data interface{}, dims ...DimPartitioner) (u []string, d [][]string, err error) {
-	dim_l := len(dims)
-	accs := make([]map[string]struct{}, dim_l, dim_l)
-	for i := 0; i < dim_l; i++ {
-		accs[i] = make(map[string]struct{})
-	}
-	if err = MapSlice(data, func(fact interface{}) error {
-		for i, dim := range dims {
-			k, _, err := dim.Partition(fact)
-			if err != nil {
-				return err
-			}
-			accs[i][k] = struct{}{}
-		}
-		return nil
-	}); err != nil {
-		return
-	}
-	d = make([][]string, dim_l, dim_l)
-	u = make([]string, dim_l, dim_l)
-	c := make([]int, dim_l, dim_l)
-	perms := 1
-	for i := 0; i < dim_l; i++ { // For each dimension provided
-		d_l := len(accs[i]) // Length of unique partitions in each dimension
-		d[i] = make([]string, d_l, d_l)
-		j := 0
-		for k, _ := range accs[i] {
-			d[i][j] = k
-			j++
-		}
-		sort.Sort(ByAlpha(d[i]))
-		c[i] = len(d[i])
-		perms *= c[i]
-	}
-	u = make([]string, perms, perms)
-	p_div := perms
-	for i := 0; i < dim_l; i++ {
-		d_l := len(accs[i])
-		if d_l > 0 {
-			p_div /= d_l
-			if p_div == 0 {
-				p_div = 1
-			}
-		}
-		for p := 0; p < perms; p++ {
-			p_i := (p / p_div) % d_l
-			if i > 0 {
-				u[p] += " "
-			}
-			u[p] += d[i][p_i]
-		}
-	}
-	return
-}
-*/
-
-/*
-type MergeDimDef struct {
-	Dims []DimPartitioner
-}
-
-func MergeDim(dims ...DimPartitioner) DimPartitioner {
-	return &MergeDimDef{
-		Dims: dims,
-	}
-}
-
-func (dim *MergeDimDef) Legends() (r []interface{}) {
-	l := len(dim.Dims)
-	r = make([]interface{}, 0, l)
-	//buf := &bytes.Buffer{}
-	for i := 0; i < l; i++ {
-		r = append(r, dim.Dims[i].Legends()...)
-	}
-	return r
-	//if i > 0 {
-	//	buf.WriteString(dim.separator)
-	//}
-	//buf.WriteString(dim.Dims[i].Display())
-	//}
-	//return buf.String()
-}
-
-func (dim *MergeDimDef) GetPartitionMap(data interface{}) (keys [][]interface{}, err error) {
-	dim_l := len(dim.Dims)
-	acc := make([][]interface{}, dim_l, dim_l)
-	keys, err = MapPartitions(data, dim.Dims...)
-	log.Printf("MapPartitions keys[\n%#v\n]", keys)
-	return
-}
-
-func (dim *MergeDimDef) Partition(fact interface{}) (keys []interface{}, err error) {
-	l := len(dim.Dims)
-	keys = make([]interface{}, 0, l)
-	for i := 0; i < l; i++ {
-		keys = append(keys, dim.Dims[i].Partition(fact)...)
-	}
-	return
-}
-*/
-/*
-	buf := &bytes.Buffer{}
-	var k string
-	for i := 0; i < l; i++ {
-		if i > 0 {
-			buf.WriteString(" ")
-		}
-		k, value, err = dim.Dims[i].Partition(fact)
-		buf.WriteString(k)
-	}
-	key = buf.String()
-	return
-}
-*/
