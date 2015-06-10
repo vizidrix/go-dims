@@ -173,15 +173,15 @@ func Test_BucketPathDef_Json(t *testing.T) {
 	enc := json.NewEncoder(buf)
 	err = enc.Encode(ks)
 	NoError(t, err)
-
-	//log.Printf("JSON\n%s\n\n", buf)
 }
 
 func Test_TableReport(t *testing.T) {
 	cfg := &ReportConfig{
 		Map:     CounterMapper,
 		AccFunc: IntSumAccumulator,
-		Dims:    Dims(Set(Value1_Dim()), Set(Value2_Dim(), Name_Dim())),
+		Dims:    Dims(Set(Value1_Dim(), Name_Dim()), Set(Value2_Dim(), Name_Dim())),
+		//Dims:    Dims(Set(Value1_Dim()), Set(Value2_Dim(), Name_Dim())),
+		//Dims: Dims(Set(Value1_Dim(), Value2_Dim()), Set(Name_Dim())),
 	}
 	report, err := TableReport(data, cfg)
 	if err != nil {
@@ -190,9 +190,13 @@ func Test_TableReport(t *testing.T) {
 	vm, err := report.ToViewModel()
 	buf := &bytes.Buffer{}
 	enc := json.NewEncoder(buf)
-	err = enc.Encode(vm)
+
+	g, err := vm.ToGrid()
+	//err = enc.Encode(vm)
+	err = enc.Encode(g)
 
 	log.Printf("Two Dim Grid Report:\n[err:%s]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report.Keys, buf)
+
 }
 
 /*
