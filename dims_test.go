@@ -4,14 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	. "github.com/stretchr/testify/assert"
-	"log"
 	"sort"
 	"testing"
 )
-
-func init() {
-	log.SetFlags(log.Llongfile)
-}
 
 type RawSource struct {
 	Value1 string
@@ -195,47 +190,6 @@ func Test_TableReport(t *testing.T) {
 	//err = enc.Encode(vm)
 	err = enc.Encode(g)
 
-	log.Printf("Two Dim Grid Report:\n[err:%s]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report.Keys, buf)
+	//log.Printf("Two Dim Grid Report:\n[err:%s]\n\nkeys:\n%s\n\njson:\n%s\n\n", err, report.Keys, buf)
 
 }
-
-/*
-func Test_ZeroDataSet(t *testing.T) {
-	d1 := Value1_Dim()
-	_, err := BuildOneDimReport([]RawSource{}, d1)
-	if err != nil {
-		t.Errorf("Expected valid output [ %s ]", err)
-	}
-}
-*/
-/*
-func Test_OneDimReport(t *testing.T) {
-	d1 := Value1_Dim()
-	report, err := BuildOneDimReport(data, d1)
-	if err != nil {
-		t.Errorf("Error building report [ %s ]", err)
-		return
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	err = enc.Encode(report)
-	log.Printf("One Dim Report [err:%s]: [\n%#v\n]\n%s\n\n", err, report, buf)
-}
-*/
-
-/*
-func Test_MultiDimension_TwoGridReport(t *testing.T) {
-	d1 := Value1_Dim()
-	d2 := Value2_Dim()
-
-	report, err := BuildTwoDimGridReport(data, MergeDim(" / ", d1, d2), d2)
-	if err != nil {
-		t.Errorf("Error building report [ %s ]", err)
-	}
-	buf := &bytes.Buffer{}
-	enc := json.NewEncoder(buf)
-	err = enc.Encode(report)
-	log.Printf("Two Dim Grid Report [err:%s]: [\n%#v\n]\n%s\n\n", err, report, buf)
-
-}
-*/
